@@ -1,0 +1,246 @@
+from ipywidgets import interact
+import ipywidgets as widgets
+import folium
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as colors
+import matplotlib.cm as cm
+import matplotlib.ticker as ticker
+
+#csv files were exported from the public data sources as follows:
+    # POP105A.csv --> contains the population for each county from 2012 to 2025
+    # FOM102A.csv --> contains the active workforce for each county from 1990 to 2024
+    # SCL109B.csv --> contains the number of people who graduated and obtained at least their Bachelor's degree for each county from 2014 to 2023
+
+#reading data 
+pop_df = pd.read_csv('POP105A.csv', usecols=[3,4,6]) 
+pop_df.rename(columns={pop_df.columns[0]: 'County',pop_df.columns[1]: 'Year',pop_df.columns[2]: 'Population'}, inplace=True)
+
+edu_df = pd.read_csv('SCL109B.csv', usecols=[2,3,5])
+edu_df.rename(columns={edu_df.columns[0]: 'County',edu_df.columns[1]: 'Year',edu_df.columns[2]: 'Graduats'}, inplace=True)
+
+act_df = pd.read_csv('FOM102A.csv', usecols=[1,2,4])
+act_df.rename(columns={act_df.columns[0]: 'County',act_df.columns[1]: 'Year',act_df.columns[2]: 'Workers'}, inplace=True)
+
+counties_df = pd.read_csv('RO_counties.csv')
+counties_df['County'] = counties_df['County'].apply(lambda x: x.strip())
+
+#merging data
+merged_df = pd.merge(pd.merge(pop_df, act_df, on=['County','Year'], how='inner'), edu_df, on=['County','Year'], how='left')
+merged_df['County'] = merged_df['County'].apply(lambda x: x.strip())
+merged_df['Year'] = merged_df['Year'].apply(lambda x: int(x.strip().split(" ")[-1]))
+merged_df['Workers'] = merged_df['Workers'].apply(lambda x: int(x*1000))
+merged_df['Workers%'] = merged_df['Workers'] / merged_df['Population'] * 100
+merged_df['Graduats%'] = merged_df['Graduats'] / merged_df['Population'] * 100
+
+#adding legends to the map
+legend_html1 = '''
+    <div style="
+        position: fixed; 
+        top: 50px; left: 20px; width: 120px; height: 160px; 
+        background-color: white; border: 2px solid grey; z-index:9999; 
+        font-size:12px; font-family: sans-serif;
+        padding: 10px; border-radius: 5px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+    ">
+        <b style="display: block; margin-bottom: 8px; text-align: center;">Population</b>
+
+        <!-- Color Bar Gradient (Black to White) -->
+        <div style="
+            background: linear-gradient(to top, lightblue, darkblue);
+            width: 25px; height: 100px; float: left;
+            border: 1px solid #999;
+        "></div>
+
+        <!-- Labels next to the Color Bar -->
+        <div style="
+            float: left; height: 100px; 
+            display: flex; flex-direction: column; 
+            justify-content: space-between; margin-left: 10px;
+         font-weight: bold;
+        ">
+            <div>Max</div>
+            <div>Mid</div>
+            <div>Min</div>
+        </div>
+    </div>
+    '''
+legend1 = folium.Element(legend_html1)  #Pack the HTML string into a Folium Element
+
+legend_html2 = '''
+    <div style="
+        position: fixed; 
+        top: 420px; left: 20px; width: 120px; height: 220px; 
+        background-color: white; border: 2px solid grey; z-index:9999; 
+        font-size:12px; font-family: sans-serif;
+        padding: 10px; border-radius: 5px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+    ">
+        <b style="display: block; margin-bottom: 8px; text-align: center;">Graduats % of the Population</b>
+
+        <!-- Color Bar Gradient -->
+        <div style="
+            background: linear-gradient(to top, red, yellow);
+            width: 25px; height: 100px; float: left;
+            border: 1px solid #999;
+        "></div>
+
+        <!-- Labels next to the Color Bar -->
+        <div style="
+            float: left; height: 100px; 
+            display: flex; flex-direction: column; 
+            justify-content: space-between; margin-left: 10px;
+         font-weight: bold;
+        ">
+            <div>Max</div>
+            <div>Mid</div>
+            <div>Min</div>
+        </div>
+        <div style="
+            float: left; height: 50px; 
+            display: flex; flex-direction: column; 
+            justify-content: space-between; 
+            margin-left: 2px; margin-top: 10px;
+         font-weight: bold;
+        ">Missing circle contour means NO data</div>
+    </div>
+    '''
+legend2 = folium.Element(legend_html2)  
+
+legend_html3 = '''
+    <div style="
+        position: fixed; 
+        top: 50px; left: 800px; width: 120px; height: 160px;
+        background-color: white; border: 2px solid grey; z-index:9999; 
+        font-size:12px; font-family: sans-serif;
+        padding: 10px; border-radius: 5px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.3);
+    ">
+        <b style="display: block; margin-bottom: 12px; text-align: center;">Workers % of the Population</b>
+
+        <!-- Max Value Row -->
+        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 5px;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;">
+                <div style="
+                    width: 32px; height: 32px; 
+                    background-color: white; 
+                    border: 2px solid black; 
+                    border-radius: 50%; 
+                    flex-shrink: 0;
+                "></div>
+            </div>
+            <span style="font-weight: bold; width: 40px; margin-left: 10px;">Max</span>
+        </div>
+
+        <!-- Mid Value Row -->
+        <div style="display: flex; align-items: center; justify-content: center; margin-bottom: 5px;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 26px;">
+                <div style="
+                    width: 26px; height: 26px; 
+                    background-color: white; 
+                    border: 2px solid black;
+                    border-radius: 50%; 
+                    flex-shrink: 0;
+                "></div>
+            </div>
+            <span style="font-weight: bold; width: 40px; margin-left: 10px;">Mid</span>
+        </div>
+
+        <!-- Min Value Row -->
+        <div style="display: flex; align-items: center; justify-content: center;">
+            <div style="display: flex; align-items: center; justify-content: center; width: 32px; height: 20px;">
+                <div style="
+                    width: 20px; height: 20px; 
+                    background-color: white; 
+                    border: 2px solid black;
+                    border-radius: 50%; 
+                    flex-shrink: 0;
+                "></div>
+            </div>
+            <span style="font-weight: bold; width: 40px; margin-left: 10px;">Min</span>
+        </div>
+    </div>
+    '''
+legend3 = folium.Element(legend_html3) 
+
+
+#definition of slider
+@interact(year=widgets.IntSlider(
+    value=2014,          # The initial starting value
+    min=2014,             # Absolute minimum bound
+    max=merged_df['Year'].max(),           # Absolute maximum bound
+    step=1,            # Incremental step size
+    description='Change Year:',
+    style={'description_width': 'initial'},
+    disabled=False,
+    continuous_update=False, # Wait until user releases mouse to trigger updates
+    orientation='horizontal',
+    readout=True,      # Displays the numeric text value next to the slider
+    readout_format='d',
+    layout=widgets.Layout(width='450px', height='40px')
+    ))
+
+def plot_data(year):
+    #creating the map
+    m=folium.Map(
+        location=[45.9431,24.9668], 
+        zoom_start=7,
+        width=1000, 
+        height=650,
+        zoom_control=False,  
+        scrollWheelZoom=False,  
+        doubleClickZoom=False, 
+        touchZoom=False, 
+    )
+    
+    fom_min=merged_df[(merged_df["Year"] == year)]["Workers%"].min()
+    fom_max=merged_df[(merged_df["Year"] == year)]["Workers%"].max()
+    pop_min=merged_df[(merged_df["Year"] == year)]["Population"].min()
+    pop_max=merged_df[(merged_df["Year"] == year)]["Population"].max()
+    gra_min=merged_df[(merged_df["Year"] == year)]["Graduats%"].min()
+    gra_max=merged_df[(merged_df["Year"] == year)]["Graduats%"].max()
+
+    colormap1 = colors.LinearSegmentedColormap.from_list('yellow_to_red', ['lightblue', 'darkblue'])
+    norm1 = colors.Normalize(vmin=pop_min, vmax=pop_max)
+    colormap2 = colors.LinearSegmentedColormap.from_list('black_to_lightgray', ['red', 'yellow'])
+    norm2 = colors.Normalize(vmin=gra_min, vmax=gra_max)
+
+    for county in range(counties_df["County"].size):
+        pop = merged_df[(merged_df["Year"] == year) & (merged_df["County"] == counties_df["County"].iloc[county])]["Population"].values[0]
+        fom = merged_df[(merged_df["Year"] == year) & (merged_df["County"] == counties_df["County"].iloc[county])]["Workers%"].values[0]
+        gra = merged_df[(merged_df["Year"] == year) & (merged_df["County"] == counties_df["County"].iloc[county])]["Graduats%"].values[0]
+
+        normalized_value1 = norm1(pop)    # normalize the specific row value
+        rgba_color1 = colormap1(normalized_value1)    # extract the RGBA color from colormap 
+        hex_color1 = colors.to_hex(rgba_color1)      # and convert it to Hex format
+        
+        if np.isnan(gra):
+            folium.CircleMarker(
+                location=[counties_df["Latitude"].iloc[county],counties_df["Longitude"].iloc[county]],
+                radius=int((10+(20-10)*(fom-fom_min)/(fom_max-fom_min))),  # values normalized between 10 and 20  --> Defined in PIXELS
+                popup=counties_df["County"].iloc[county],
+                color='black',
+                weight=0,              
+                fill=True,
+                fill_color=hex_color1,
+                fill_opacity=1,
+            ).add_to(m)
+        else:
+            normalized_value2 = norm2(gra)    # normalize the specific row value
+            rgba_color2 = colormap2(normalized_value2)    # extract the RGBA color from colormap 
+            hex_color2 = colors.to_hex(rgba_color2)      # and convert it to Hex format
+            folium.CircleMarker(
+                location=[counties_df["Latitude"].iloc[county],counties_df["Longitude"].iloc[county]],
+                radius=int((10+(20-10)*(fom-fom_min)/(fom_max-fom_min))),  # values normalized between 10 and 20  
+                popup=counties_df["County"].iloc[county],
+                color=hex_color2,
+                weight=5,  
+                fill=True,
+                fill_color=hex_color1,
+                fill_opacity=1,
+            ).add_to(m)
+    m.get_root().html.add_child(legend1)
+    m.get_root().html.add_child(legend2)
+    m.get_root().html.add_child(legend3)
+    display(m)
